@@ -1,6 +1,6 @@
 import { LoginForm } from "@/components/auth/login-form";
 import { Logo } from "@/components/ui/logo";
-import { Lock, Mail } from "lucide-react";
+import { Mail } from "lucide-react";
 
 export default function LoginPage() {
   return (
@@ -26,13 +26,10 @@ export default function LoginPage() {
           <LoginForm />
 
           <div className="mt-8 rounded-[14px] border border-slate-200 bg-slate-50/80 px-4 py-3.5">
-            <p className="text-xs font-medium text-slate-500">Demo credentials</p>
-            <div className="mt-2 grid grid-cols-[auto_1fr] gap-2 text-xs text-slate-600">
-              <span className="flex items-center gap-1"><Mail className="h-3 w-3 text-slate-400" />Email:</span>
-              <span className="font-mono text-slate-700">demo@airevenue.com</span>
-              <span className="flex items-center gap-1"><Lock className="h-3 w-3 text-slate-400" />Password:</span>
-              <span className="font-mono text-slate-700">12345678</span>
-            </div>
+            <p className="text-xs font-medium text-slate-500">New here?</p>
+            <p className="mt-2 text-xs text-slate-600">
+              Create an account to get started. If email confirmation is enabled, please check your inbox after signing up.
+            </p>
           </div>
         </div>
 

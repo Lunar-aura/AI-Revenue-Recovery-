@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Eye, EyeOff, Lock, Mail, User } from "lucide-react";
+import { createClient } from "@/lib/supabase";
 
 type SignUpFormProps = {
   onSuccess?: () => void;
@@ -18,39 +19,79 @@ export function SignUpForm({ onSuccess }: SignUpFormProps) {
   const [showConfirm, setShowConfirm] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<{
+    name?: string;
+    email?: string;
+    password?: string;
+    confirmPassword?: string;
+  }>({});
 
   const emailValid = /^\S+@\S+\.\S+$/.test(email);
-  const passwordValid = password.length >= 8;
   const passwordsMatch = password === confirmPassword;
-  const canSubmit = name.trim() && emailValid && passwordValid && passwordsMatch && !loading;
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
 
+    // Validate on submit so every click produces VISIBLE feedback.
+    // (Previously the button was disabled when invalid, so these
+    // messages were unreachable and clicking appeared to do nothing.)
+    const errors: typeof fieldErrors = {};
     if (!name.trim()) {
-      setError("Please enter your full name.");
-      return;
+      errors.name = "Please enter your full name.";
     }
     if (!emailValid) {
-      setError("Please enter a valid email address.");
-      return;
+      errors.email = "Please enter a valid email address.";
     }
     if (password.length < 8) {
-      setError("Password must be at least 8 characters.");
-      return;
+      errors.password = "Password must be at least 8 characters.";
     }
     if (!passwordsMatch) {
-      setError("Passwords do not match.");
+      errors.confirmPassword = "Passwords do not match.";
+    }
+    setFieldErrors(errors);
+    if (Object.keys(errors).length > 0) {
       return;
     }
 
     setLoading(true);
 
-    await new Promise((resolve) => setTimeout(resolve, 900));
+    try {
+      const supabase = createClient();
 
-    setLoading(false);
-    onSuccess?.();
+      const { data, error: signUpError } = await supabase.auth.signUp({
+        email: email.trim(),
+        password,
+        options: {
+          data: {
+            full_name: name.trim(),
+          },
+        },
+      });
+
+      if (signUpError) {
+        setError(signUpError.message);
+        return;
+      }
+
+      if (data.user && !data.user.email_confirmed_at) {
+        setError("Account created! Please check your email to confirm your account before signing in.");
+        return;
+      }
+
+      onSuccess?.();
+    } catch (err) {
+      // Surface unexpected failures (network down, client init, etc.)
+      // instead of failing silently.
+      console.error("Signup failed:", err);
+      setError(
+        err instanceof Error
+          ? `Signup failed: ${err.message}`
+          : "Signup failed. Please try again.",
+      );
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
@@ -60,10 +101,11 @@ export function SignUpForm({ onSuccess }: SignUpFormProps) {
         type="text"
         autoComplete="name"
         required
-        placeholder="Jane Doe"
+        placeholder="Enter your full name"
         value={name}
         onChange={(e) => setName(e.target.value)}
         icon={<User className="h-5 w-5" />}
+        error={fieldErrors.name}
       />
 
       <Input
@@ -71,10 +113,11 @@ export function SignUpForm({ onSuccess }: SignUpFormProps) {
         type="email"
         autoComplete="email"
         required
-        placeholder="you@company.com"
+        placeholder="Enter your email address"
         value={email}
         onChange={(e) => setEmail(e.target.value)}
         icon={<Mail className="h-5 w-5" />}
+        error={fieldErrors.email}
       />
 
       <Input
@@ -82,7 +125,7 @@ export function SignUpForm({ onSuccess }: SignUpFormProps) {
         type={showPassword ? "text" : "password"}
         autoComplete="new-password"
         required
-        placeholder="••••••••"
+        placeholder="Enter your password"
         value={password}
         onChange={(e) => setPassword(e.target.value)}
         icon={<Lock className="h-5 w-5" />}
@@ -97,6 +140,7 @@ export function SignUpForm({ onSuccess }: SignUpFormProps) {
             {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
           </button>
         }
+        error={fieldErrors.password}
       />
 
       <Input
@@ -104,7 +148,7 @@ export function SignUpForm({ onSuccess }: SignUpFormProps) {
         type={showConfirm ? "text" : "password"}
         autoComplete="new-password"
         required
-        placeholder="••••••••"
+        placeholder="Confirm your password"
         value={confirmPassword}
         onChange={(e) => setConfirmPassword(e.target.value)}
         icon={<Lock className="h-5 w-5" />}
@@ -119,6 +163,7 @@ export function SignUpForm({ onSuccess }: SignUpFormProps) {
             {showConfirm ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
           </button>
         }
+        error={fieldErrors.confirmPassword}
       />
 
       {error ? (
@@ -127,10 +172,13 @@ export function SignUpForm({ onSuccess }: SignUpFormProps) {
         </p>
       ) : null}
 
+      {/* Only disabled while a request is in flight — clicking with invalid
+          input must always show visible validation errors instead of doing
+          nothing. */}
       <Button
         type="submit"
         variant="primary"
-        disabled={!canSubmit}
+        disabled={loading}
         className="w-full disabled:opacity-60"
       >
         {loading ? (

@@ -2,19 +2,55 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Bell, ChevronDown, Menu, Sparkles, X } from "lucide-react";
+import { Bell, ChevronDown, LogOut, Menu, Sparkles, X } from "lucide-react";
 import { useState } from "react";
 import { Avatar } from "@/components/ui/avatar";
 import { SearchInput } from "@/components/ui/search-input";
 import { navigationItems } from "@/lib/dashboard-data";
+import { createClient } from "@/lib/supabase";
+import { logout } from "@/app/actions";
+import { useEffect } from "react";
 
 type DashboardShellProps = {
   children: React.ReactNode;
+  user?: { name?: string; email?: string };
 };
 
-export function DashboardShell({ children }: DashboardShellProps) {
+export function DashboardShell({ children, user }: DashboardShellProps) {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [authUser, setAuthUser] = useState<{ name: string; email: string } | null>(null);
+
+  // Fallback: if no user info was passed in (client-only pages),
+  // fetch the signed-in user's name/email from Supabase Auth so
+  // the header never shows the generic "User / Signed in".
+  const userNameProp = user?.name;
+  useEffect(() => {
+    if (userNameProp) return;
+    let cancelled = false;
+    const supabase = createClient();
+    supabase.auth.getUser().then(({ data }) => {
+      if (cancelled) return;
+      const u = data.user;
+      if (!u) return;
+      setAuthUser({
+        name: u.user_metadata?.full_name || u.email?.split("@")[0] || "User",
+        email: u.email ?? "",
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [userNameProp]);
+
+  const displayName = user?.name || authUser?.name || "User";
+  const displayEmail = user?.email || authUser?.email || "Signed in";
+  const initials = displayName
+    .split(" ")
+    .map((n) => n[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
@@ -114,11 +150,20 @@ export function DashboardShell({ children }: DashboardShellProps) {
                 <button className="rounded-full border border-slate-200 p-2.5 text-slate-600 transition hover:bg-slate-100">
                   <Bell className="h-5 w-5" />
                 </button>
+                <form action={logout}>
+                  <button
+                    type="submit"
+                    className="rounded-full border border-slate-200 p-2.5 text-slate-600 transition hover:bg-slate-100"
+                    title="Sign out"
+                  >
+                    <LogOut className="h-5 w-5" />
+                  </button>
+                </form>
                 <button className="flex items-center gap-3 rounded-full border border-slate-200 bg-white px-2 py-1.5 shadow-sm">
-                  <Avatar name="Alicia Lane" initials="AL" tone="violet" />
+                  <Avatar name={displayName} initials={initials} tone="violet" />
                   <div className="hidden text-left sm:block">
-                    <p className="text-sm font-semibold text-slate-900">Alicia Lane</p>
-                    <p className="text-xs text-slate-500">Founder</p>
+                    <p className="text-sm font-semibold text-slate-900">{displayName}</p>
+                    <p className="text-xs text-slate-500">{displayEmail}</p>
                   </div>
                   <ChevronDown className="mr-1 h-4 w-4 text-slate-400" />
                 </button>

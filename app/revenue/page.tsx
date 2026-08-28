@@ -1,4 +1,5 @@
 import { DashboardShell } from "@/components/layout/dashboard-shell";
+import { createServerClient } from "@/lib/supabase/server";
 import { RevenueCard } from "@/components/revenue/revenue-card";
 import { RevenueTrendChart } from "@/components/revenue/revenue-trend-chart";
 import { RevenueBreakdownCard } from "@/components/revenue/revenue-breakdown-card";
@@ -73,9 +74,24 @@ const timelineItems = [
   { title: "High-value customer purchase", detail: "A return customer placed a premium bundle order this afternoon.", time: "1d ago" },
 ];
 
-export default function RevenuePage() {
+export default async function RevenuePage() {
+  const supabase = await createServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  const displayName =
+    user?.user_metadata?.full_name ||
+    user?.email?.split("@")[0] ||
+    "User";
+
   return (
-    <DashboardShell>
+    <DashboardShell
+      user={{
+        name: displayName,
+        email: user?.email,
+      }}
+    >
       <div className="mx-auto flex max-w-7xl flex-col gap-6">
         <section className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_20px_50px_-24px_rgba(15,23,42,0.16)] sm:p-8">
           <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">

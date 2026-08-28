@@ -8,6 +8,7 @@ import {
   Settings,
   ShoppingCart,
   Sparkles,
+  Store,
   TrendingUp,
   Users,
 } from "lucide-react";
@@ -43,6 +44,7 @@ export const navigationItems: NavigationItem[] = [
   { label: "Dashboard", href: "/dashboard", icon: LayoutGrid },
   { label: "Products", href: "/dashboard/products", icon: Package2 },
   { label: "Orders", href: "/dashboard/orders", icon: ShoppingCart },
+  { label: "Store", href: "/dashboard/store", icon: Store },
   { label: "Customers", href: "/dashboard/customers", icon: Users },
   { label: "Problems", href: "/dashboard/problems", icon: AlertTriangle },
   { label: "AI Insights", href: "/dashboard/insights", icon: BrainCircuit },

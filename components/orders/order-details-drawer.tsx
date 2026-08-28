@@ -64,7 +64,6 @@ export function OrderDetailsDrawer({ open, order, onClose }: OrderDetailsDrawerP
               {order.products.map((item) => (
                 <div key={item} className="flex items-center justify-between rounded-[14px] bg-slate-50 px-3 py-2.5 text-sm text-slate-700">
                   <span>{item}</span>
-                  <span className="font-semibold text-slate-900">x1</span>
                 </div>
               ))}
             </div>

@@ -1,6 +1,36 @@
 import type { LucideIcon } from "lucide-react";
 import { BarChart3, Package2, TrendingDown, TrendingUp } from "lucide-react";
 
+export type ProductStatus = "Active" | "Draft" | "Archived";
+
+export type Product = {
+  id: string;
+  name: string;
+  description: string;
+  price: string;
+  stock: number;
+  imageUrl: string;
+  status: ProductStatus;
+  createdAt?: string;
+};
+
+export type ProductFormData = {
+  name: string;
+  description: string;
+  price: string;
+  stock: number;
+  imageUrl: string;
+  status: ProductStatus;
+};
+
+export const productStatuses: ProductStatus[] = ["Active", "Draft", "Archived"];
+
+export const mockProducts: Product[] = [
+  { id: "prod-1", name: "Wireless Headphones", description: "Noise-cancelling wireless headphones with 30-hour battery life.", price: "79.99", stock: 24, imageUrl: "", status: "Active", createdAt: "2024-01-15" },
+  { id: "prod-2", name: "Running Shoes", description: "Lightweight running shoes with responsive cushioning.", price: "120.00", stock: 12, imageUrl: "", status: "Active", createdAt: "2024-02-20" },
+  { id: "prod-3", name: "Classic T-Shirt", description: "Premium cotton t-shirt available in multiple colors.", price: "35.00", stock: 45, imageUrl: "", status: "Draft", createdAt: "2024-03-10" },
+];
+
 export type ProductStat = {
   title: string;
   value: string;

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Modal } from "./Modal";
 import { LoginForm } from "@/components/auth/login-form";
 import { SignUpForm } from "@/components/auth/signup-form";
+import { createClient } from "@/lib/supabase";
 
 type Props = {
   open: boolean;

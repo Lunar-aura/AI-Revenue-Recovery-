@@ -1,6 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { createClient } from "@/lib/supabase";
+import { formatPrice } from "@/lib/store-data";
+import type { OrderRow, OrderDetail } from "@/lib/orders-data";
 import { OrderStatCard } from "@/components/orders/order-stat-card";
 import { OrderStatusCard } from "@/components/orders/order-status-card";
 import { OrderTable } from "@/components/orders/order-table";
@@ -17,28 +20,218 @@ import { DashboardShell } from "@/components/layout/dashboard-shell";
 import {
   orderStats,
   orderStatuses,
-  orderRows,
   orderAlerts,
   aiInsight,
   recentOrderActivity,
   customerInsights,
-  orderDetails,
-  orderDetail,
 } from "@/lib/orders-data";
 import {
   ArrowDownToLine,
   BadgeAlert,
   BrainCircuit,
+  Inbox,
   RefreshCw,
   Users,
   Wallet,
   XCircle,
 } from "lucide-react";
 
-export default function OrdersPage() {
-  const [activeOrder, setActiveOrder] = useState<string | null>(null);
+// Raw row shape returned by the joined Supabase query in loadOrders().
+type SupabaseOrder = {
+  id: string;
+  status: string;
+  payment_status: string;
+  subtotal: number | string;
+  shipping: number | string;
+  total: number | string;
+  created_at: string;
+  customer: {
+    name: string;
+    email: string;
+    address: string | null;
+    city: string | null;
+    postal_code: string | null;
+  } | null;
+  items: {
+    id: string;
+    quantity: number;
+    unit_price: number | string;
+    total: number | string;
+    product: { name: string } | null;
+  }[] | null;
+};
 
-  const resolvedDetail = activeOrder ? orderDetails[activeOrder] ?? orderDetail : null;
+function mapPaymentStatus(value: string): OrderRow["payment"] {
+  switch ((value ?? "").toLowerCase()) {
+    case "paid":
+      return "Paid";
+    case "failed":
+      return "Failed";
+    case "refunded":
+      return "Refunded";
+    default:
+      return "Pending";
+  }
+}
+
+function mapFulfillmentStatus(value: string): OrderRow["fulfillment"] {
+  switch ((value ?? "").toLowerCase()) {
+    case "processing":
+      return "Processing";
+    case "shipped":
+      return "Shipped";
+    case "delivered":
+      return "Delivered";
+    case "cancelled":
+      return "Cancelled";
+    case "refunded":
+      return "Refunded";
+    default:
+      return "Pending";
+  }
+}
+
+export default function OrdersPage() {
+  const [activeOrderId, setActiveOrderId] = useState<string | null>(null);
+  const [orders, setOrders] = useState<SupabaseOrder[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  const loadOrders = useCallback(async () => {
+    setLoading(true);
+    setLoadError(null);
+
+    try {
+      const supabase = createClient();
+
+      // Resolve the authenticated user. stores.owner_id references
+      // auth.users(id), so ownership must always be checked against
+      // the auth user id (never the email).
+      const {
+        data: { user },
+        error: authError,
+      } = await supabase.auth.getUser();
+
+      if (authError || !user) {
+        console.error("Failed to resolve authenticated user:", authError);
+        setOrders([]);
+        setLoadError("You must be signed in to view orders.");
+        return;
+      }
+
+      // Fetch every store owned by this user (uuid match on owner_id).
+      const { data: storesData, error: storesError } = await supabase
+        .from("stores")
+        .select("id")
+        .eq("owner_id", user.id);
+
+      if (storesError) {
+        console.error("Failed to fetch stores from Supabase:", storesError);
+        setOrders([]);
+        setLoadError("Could not load your stores. Please try again.");
+        return;
+      }
+
+      const storeIds = (storesData ?? []).map((s: Record<string, unknown>) => s.id as string);
+
+      // No stores yet -> there can be no orders either. Show empty state.
+      if (storeIds.length === 0) {
+        setOrders([]);
+        return;
+      }
+
+      // RLS (orders_select_owner) additionally scopes these rows to the
+      // authenticated owner, so only their own stores' orders are returned.
+      const { data: ordersData, error: ordersError } = await supabase
+        .from("orders")
+        .select(
+          `id,
+           status,
+           payment_status,
+           subtotal,
+           shipping,
+           total,
+           created_at,
+           customer:customers(name, email, address, city, postal_code),
+           items:order_items(id, quantity, unit_price, total, product:products(name))`,
+        )
+        .in("store_id", storeIds)
+        .order("created_at", { ascending: false });
+
+      if (ordersError) {
+        console.error("Failed to fetch orders from Supabase:", ordersError);
+        setOrders([]);
+        setLoadError("Could not load orders. Please try again.");
+        return;
+      }
+
+      setOrders((ordersData ?? []) as unknown as SupabaseOrder[]);
+    } catch (err) {
+      console.error("Error loading orders:", err);
+      setOrders([]);
+      setLoadError("Something went wrong while loading orders.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadOrders();
+  }, [loadOrders]);
+
+  const tableRows: OrderRow[] = orders.map((row) => ({
+    id: row.id,
+    customer: row.customer?.name ?? "Unknown customer",
+    products: `${row.items?.length ?? 0} item${(row.items?.length ?? 0) === 1 ? "" : "s"}`,
+    amount: formatPrice(row.total ?? 0),
+    payment: mapPaymentStatus(row.payment_status ?? "pending"),
+    fulfillment: mapFulfillmentStatus(row.status ?? "pending"),
+    date: new Date(row.created_at).toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    }),
+    status: ((row.status ?? "pending").toLowerCase()) as OrderRow["status"],
+  }));
+
+  function getOrderDetail(orderId: string): OrderDetail | null {
+    const order = orders.find((o) => o.id === orderId);
+    if (!order) return null;
+
+    const addressParts = [
+      order.customer?.address,
+      order.customer?.city,
+      order.customer?.postal_code,
+    ].filter(Boolean);
+
+    return {
+      id: order.id,
+      customer: order.customer?.name ?? "Unknown customer",
+      email: order.customer?.email ?? "—",
+      products: (order.items ?? []).map(
+        (item) => `${item.product?.name ?? "Product"} × ${item.quantity}`,
+      ),
+      shipping:
+        addressParts.length > 0 ? addressParts.join(", ") : "No shipping address on file",
+      payment: `${(order.payment_status ?? "pending").charAt(0).toUpperCase()}${(order.payment_status ?? "pending").slice(1)} — ${formatPrice(order.total ?? 0)}`,
+      timeline: [
+        {
+          event: "Order placed",
+          time: new Date(order.created_at).toLocaleString("en-US", {
+            month: "short",
+            day: "numeric",
+            year: "numeric",
+            hour: "numeric",
+            minute: "2-digit",
+          }),
+        },
+      ],
+      status: `${(order.status ?? "pending").charAt(0).toUpperCase()}${(order.status ?? "pending").slice(1)}`,
+      notes: [],
+    };
+  }
+
+  const resolvedDetail = activeOrderId ? getOrderDetail(activeOrderId) : null;
 
   return (
     <DashboardShell>
@@ -61,8 +254,8 @@ export default function OrdersPage() {
                 <ArrowDownToLine className="h-4 w-4" />
                 Export orders
               </Button>
-              <Button variant="primary">
-                <RefreshCw className="h-4 w-4" />
+              <Button variant="primary" onClick={() => loadOrders()} disabled={loading}>
+                <RefreshCw className={loading ? "h-4 w-4 animate-spin" : "h-4 w-4"} />
                 Refresh
               </Button>
             </div>
@@ -122,13 +315,36 @@ export default function OrdersPage() {
         </section>
 
         <section>
-          <OrderTable rows={orderRows} onViewOrder={(row) => setActiveOrder(row.id)} />
+          {loading ? (
+            <div className="grid gap-6 lg:grid-cols-2">
+              <LoadingSkeleton />
+              <LoadingSkeleton />
+            </div>
+          ) : loadError ? (
+            <EmptyState
+              title="Could not load orders"
+              description={loadError}
+              icon={BadgeAlert}
+            />
+          ) : tableRows.length === 0 ? (
+            <EmptyState
+              title="No orders yet"
+              description="You have no orders across any of your stores yet. New customer orders will appear here automatically."
+              icon={Inbox}
+            />
+          ) : (
+            <OrderTable
+              rows={tableRows}
+              totalCount={tableRows.length}
+              onViewOrder={(row) => setActiveOrderId(row.id)}
+            />
+          )}
         </section>
 
         <OrderDetailsDrawer
-          open={activeOrder !== null}
+          open={activeOrderId !== null}
           order={resolvedDetail}
-          onClose={() => setActiveOrder(null)}
+          onClose={() => setActiveOrderId(null)}
         />
 
         <section className="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
@@ -167,7 +383,7 @@ export default function OrdersPage() {
           />
           <EmptyState
             title="No activity to replay"
-            description="Once orders are connected, historical events will render here."
+            description="Once orders are connected, historical events will appear here."
             icon={Users}
           />
         </section>

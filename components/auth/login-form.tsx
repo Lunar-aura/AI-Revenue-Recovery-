@@ -4,8 +4,8 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { buildAuthState, setAuth, validateCredentials } from "@/lib/auth";
 import { Eye, EyeOff, Lock, Mail } from "lucide-react";
+import { createClient } from "@/lib/supabase";
 
 type LoginFormProps = {
   onSuccess?: () => void;
@@ -16,7 +16,6 @@ export function LoginForm({ onSuccess }: LoginFormProps) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  const [remember, setRemember] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -35,18 +34,22 @@ export function LoginForm({ onSuccess }: LoginFormProps) {
 
     setLoading(true);
 
-    await new Promise((resolve) => setTimeout(resolve, 900));
+    const supabase = createClient();
+    const { error: signInError } = await supabase.auth.signInWithPassword({
+      email: email.trim(),
+      password,
+    });
 
-    if (validateCredentials(email, password)) {
-      setAuth(buildAuthState(email), remember);
-      if (onSuccess) {
-        onSuccess();
-      } else {
-        router.replace("/dashboard");
-      }
-    } else {
-      setError("Incorrect email or password. Please try again.");
+    if (signInError) {
+      setError(signInError.message);
       setLoading(false);
+      return;
+    }
+
+    if (onSuccess) {
+      onSuccess();
+    } else {
+      router.replace("/dashboard");
     }
   }
 
@@ -57,7 +60,7 @@ export function LoginForm({ onSuccess }: LoginFormProps) {
         type="email"
         autoComplete="email"
         required
-        placeholder="demo@airevenue.com"
+        placeholder="Enter your email"
         value={email}
         onChange={(e) => setEmail(e.target.value)}
         icon={<Mail className="h-5 w-5" />}
@@ -68,7 +71,7 @@ export function LoginForm({ onSuccess }: LoginFormProps) {
         type={showPassword ? "text" : "password"}
         autoComplete="current-password"
         required
-        placeholder="••••••••"
+        placeholder="Enter your password"
         value={password}
         onChange={(e) => setPassword(e.target.value)}
         icon={<Lock className="h-5 w-5" />}
@@ -86,15 +89,6 @@ export function LoginForm({ onSuccess }: LoginFormProps) {
       />
 
       <div className="flex items-center justify-between">
-        <label className="flex items-center gap-2.5 text-sm text-slate-600">
-          <input
-            type="checkbox"
-            checked={remember}
-            onChange={(e) => setRemember(e.target.checked)}
-            className="h-4 w-4 rounded border-slate-300 text-violet-600 focus:ring-violet-500"
-          />
-          Remember me
-        </label>
         <a href="#" className="text-sm font-medium text-violet-600 hover:text-violet-700">
           Forgot password?
         </a>

@@ -9,10 +9,11 @@ const avatarTones: ("violet" | "sky" | "slate")[] = ["violet", "sky", "slate"];
 
 type OrderTableProps = {
   rows: OrderRow[];
+  totalCount?: number;
   onViewOrder?: (row: OrderRow) => void;
 };
 
-export function OrderTable({ rows, onViewOrder }: OrderTableProps) {
+export function OrderTable({ rows, totalCount, onViewOrder }: OrderTableProps) {
   return (
     <div className="rounded-[24px] border border-slate-200 bg-white p-6 shadow-[0_16px_42px_-24px_rgba(15,23,42,0.24)]">
       <div className="flex flex-wrap items-center justify-between gap-4">
@@ -81,13 +82,9 @@ export function OrderTable({ rows, onViewOrder }: OrderTableProps) {
       </div>
 
       <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
-        <p className="text-sm text-slate-500">Showing 1-6 of 24 orders</p>
-        <div className="flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 p-1">
-          <Button variant="secondary" size="sm" className="rounded-full">Previous</Button>
-          <Button variant="primary" size="sm" className="h-8 w-8 rounded-full p-0">1</Button>
-          <Button variant="secondary" size="sm" className="rounded-full">2</Button>
-          <Button variant="secondary" size="sm" className="rounded-full">Next</Button>
-        </div>
+        <p className="text-sm text-slate-500">
+          Showing {rows.length} of {totalCount ?? rows.length} {((totalCount ?? rows.length) === 1 ? "order" : "orders")}
+        </p>
       </div>
     </div>
   );
