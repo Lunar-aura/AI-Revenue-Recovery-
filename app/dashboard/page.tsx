@@ -4,9 +4,38 @@ import { RevenueProblemsCard } from "@/components/dashboard/revenue-problems-car
 import { StatCard } from "@/components/dashboard/stat-card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { DashboardShell } from "@/components/layout/dashboard-shell";
-import { recentActivity, recommendation, revenueProblems, stats } from "@/lib/dashboard-data";
-import { ArrowRight, BadgeAlert, CircleOff, Sparkles } from "lucide-react";
+import { getDashboardData } from "@/app/actions";
+import type { DashboardOverview } from "@/app/actions";
+import { ArrowRight, BadgeAlert, CircleOff, Package, ShoppingCart, Sparkles, TrendingUp, Users } from "lucide-react";
 import { createServerClient } from "@/lib/supabase/server";
+
+function formatCurrency(value: number) {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: value >= 1000 ? 0 : 2,
+  }).format(value);
+}
+
+function capitalize(value: string) {
+  if (!value) return value;
+  return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
+function timeAgo(value: string) {
+  const then = new Date(value).getTime();
+  if (Number.isNaN(then)) return "recently";
+  const seconds = Math.max(0, Math.floor((Date.now() - then) / 1000));
+  if (seconds < 60) return "just now";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days}d ago`;
+  const months = Math.floor(days / 30);
+  return months < 12 ? `${months}mo ago` : `${Math.floor(months / 12)}y ago`;
+}
 
 export default async function DashboardPage() {
   const supabase = await createServerClient();
@@ -18,6 +47,78 @@ export default async function DashboardPage() {
     user?.user_metadata?.full_name ||
     user?.email?.split("@")[0] ||
     "User";
+
+  const overview: DashboardOverview = await getDashboardData();
+
+  const statCards = [
+    {
+      title: "Revenue",
+      value: formatCurrency(overview.totalRevenue),
+      change:
+        overview.revenueChangePct !== null
+          ? `${overview.revenueChangePct >= 0 ? "+" : ""}${overview.revenueChangePct}%`
+          : overview.totalOrders > 0
+            ? "No prior period"
+            : "No orders yet",
+      changeType:
+        (overview.revenueChangePct ?? 0) >= 0 ? ("positive" as const) : ("negative" as const),
+      comparison: "vs previous 30 days",
+      icon: TrendingUp,
+    },
+    {
+      title: "Orders",
+      value: overview.totalOrders.toLocaleString(),
+      change:
+        overview.ordersChangePct !== null
+          ? `${overview.ordersChangePct >= 0 ? "+" : ""}${overview.ordersChangePct}%`
+          : overview.totalOrders > 0
+            ? "No prior period"
+            : "No orders yet",
+      changeType:
+        (overview.ordersChangePct ?? 0) >= 0 ? ("positive" as const) : ("negative" as const),
+      comparison: `vs previous 30 days · ${overview.totalStores} ${
+        overview.totalStores === 1 ? "store" : "stores"
+      }`,
+      icon: ShoppingCart,
+    },
+    {
+      title: "Customers",
+      value: overview.totalCustomers.toLocaleString(),
+      change:
+        overview.atRiskCustomers > 0
+          ? `${overview.atRiskCustomers} at risk`
+          : overview.totalCustomers > 0
+            ? "Healthy"
+            : "No customers yet",
+      changeType:
+        overview.atRiskCustomers > 0 ? ("negative" as const) : ("positive" as const),
+      comparison: "registered customers",
+      icon: Users,
+    },
+    {
+      title: "Products",
+      value: overview.totalProducts.toLocaleString(),
+      change:
+        overview.totalProducts > 0 ? `${overview.activeProducts} active` : "No products yet",
+      changeType: "positive" as const,
+      comparison: "in your catalog",
+      icon: Package,
+    },
+  ];
+
+  const recentActivity = overview.recentOrders.map((order) => {
+    const flags =
+      order.payment_status === "failed"
+        ? " (payment failed)"
+        : order.payment_status === "pending"
+          ? " (payment pending)"
+          : "";
+    return {
+      title: order.customerName ?? "New order",
+      detail: `${order.storeName ? `${order.storeName} · ` : ""}${formatCurrency(order.total)} · ${capitalize(order.status)}${flags}`,
+      time: timeAgo(order.created_at),
+    };
+  });
 
   return (
     <DashboardShell
@@ -38,7 +139,7 @@ export default async function DashboardPage() {
                 Welcome back
               </h1>
               <p className="mt-3 text-base leading-7 text-slate-600">
-                Here's what's happening in your business today. Focus on the issues putting revenue at risk and the best next steps to recover it.
+                Here&apos;s what&apos;s happening in your business today. Focus on the issues putting revenue at risk and the best next steps to recover it.
               </p>
             </div>
             <button className="inline-flex items-center justify-center gap-2 rounded-[14px] bg-violet-600 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-violet-700">
@@ -49,14 +150,14 @@ export default async function DashboardPage() {
         </section>
 
         <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          {stats.map((stat) => (
+          {statCards.map((stat) => (
             <StatCard key={stat.title} {...stat} />
           ))}
         </section>
 
         <section className="grid gap-6 xl:grid-cols-[1.25fr_0.75fr]">
-          <RevenueProblemsCard problems={revenueProblems} />
-          <RecommendationCard {...recommendation} />
+          <RevenueProblemsCard problems={overview.revenueProblems} />
+          <RecommendationCard {...overview.recommendation} />
         </section>
 
         <section className="grid gap-6 lg:grid-cols-[1.15fr_0.85fr]">

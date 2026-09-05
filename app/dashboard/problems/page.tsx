@@ -4,6 +4,9 @@ import { Button } from "@/components/ui/button";
 import { SectionHeader } from "@/components/ui/section-header";
 import { BadgeAlert, RefreshCw, ShieldCheck, Sparkles } from "lucide-react";
 import { createServerClient } from "@/lib/supabase/server";
+import { getDashboardData } from "@/app/actions";
+import { RevenueProblemsCard } from "@/components/dashboard/revenue-problems-card";
+import { ActivityTimeline } from "@/components/dashboard/activity-timeline";
 
 export default async function ProblemsPage() {
   const supabase = await createServerClient();
@@ -15,6 +18,14 @@ export default async function ProblemsPage() {
     user?.user_metadata?.full_name ||
     user?.email?.split("@")[0] ||
     "User";
+
+  const overview = await getDashboardData();
+
+  const recentActivity = overview.recentOrders.map((order) => ({
+    title: order.customerName ?? "New order",
+    detail: `${order.storeName ? `${order.storeName} · ` : ""}$${order.total.toLocaleString()} · ${order.status}`,
+    time: new Date(order.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+  }));
 
   return (
     <DashboardShell
@@ -50,11 +61,47 @@ export default async function ProblemsPage() {
             description="Issues currently putting revenue at risk."
           />
           <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-            <EmptyState
-              title="No active problems"
-              description="Your store is healthy for now. New issues will appear here as they are detected."
-              icon={BadgeAlert}
-            />
+            {overview.revenueProblems.length > 0 ? (
+              overview.revenueProblems.map((problem) => (
+                <div key={problem.title} className="rounded-[18px] border border-slate-200 bg-white p-5 shadow-[0_10px_30px_-20px_rgba(15,23,42,0.18)]">
+                  <div className="flex items-center gap-2">
+                    <BadgeAlert tone={problem.severity === 'High' ? 'rose' : problem.severity === 'Medium' ? 'amber' : 'emerald'} />
+                    <h3 className="font-semibold text-slate-900">{problem.title}</h3>
+                  </div>
+                  <p className="mt-3 text-sm leading-6 text-slate-600">{problem.description}</p>
+                  <p className="mt-2 text-sm font-semibold text-slate-900">{problem.impact}</p>
+                </div>
+              ))
+            ) : (
+              <div className="md:col-span-2 xl:col-span-3">
+                <EmptyState
+                  title="No active problems"
+                  description="Your store is healthy for now. New issues will appear here as they are detected."
+                  icon={BadgeAlert}
+                />
+              </div>
+            )}
+          </div>
+        </section>
+
+        <section className="grid gap-6 lg:grid-cols-2">
+          <div className="rounded-[24px] border border-slate-200 bg-white p-6 shadow-[0_16px_42px_-24px_rgba(15,23,42,0.24)]">
+            <h2 className="text-xl font-semibold tracking-tight text-slate-950">Recent orders</h2>
+            <p className="mt-1 text-sm text-slate-500">Latest orders across your stores.</p>
+            <div className="mt-6">
+              <ActivityTimeline items={recentActivity} />
+            </div>
+          </div>
+          <div className="space-y-6">
+            <div className="rounded-[24px] border border-slate-200 bg-white p-6 shadow-[0_16px_42px_-24px_rgba(15,23,42,0.24)]">
+              <h2 className="text-xl font-semibold tracking-tight text-slate-950">AI recommendation</h2>
+              <p className="mt-1 text-sm text-slate-500">Suggested next steps based on your data.</p>
+              <div className="mt-4">
+                <p className="text-sm font-medium text-slate-900">{overview.recommendation.title}</p>
+                <p className="mt-1 text-sm text-slate-600">{overview.recommendation.description}</p>
+                <p className="mt-2 text-sm font-semibold text-violet-700">{overview.recommendation.impact}</p>
+              </div>
+            </div>
             <EmptyState
               title="No at-risk signals"
               description="All monitored areas look healthy. Risk signals will appear here when thresholds are crossed."

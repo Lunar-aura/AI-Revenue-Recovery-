@@ -18,14 +18,6 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Button } from "@/components/ui/button";
 import { DashboardShell } from "@/components/layout/dashboard-shell";
 import {
-  orderStats,
-  orderStatuses,
-  orderAlerts,
-  aiInsight,
-  recentOrderActivity,
-  customerInsights,
-} from "@/lib/orders-data";
-import {
   ArrowDownToLine,
   BadgeAlert,
   BrainCircuit,
@@ -34,6 +26,10 @@ import {
   Users,
   Wallet,
   XCircle,
+  ShoppingCart,
+  PackageCheck,
+  Clock3,
+  Ban,
 } from "lucide-react";
 
 // Raw row shape returned by the joined Supabase query in loadOrders().
@@ -96,6 +92,8 @@ export default function OrdersPage() {
   const [orders, setOrders] = useState<SupabaseOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [userName, setUserName] = useState<string>("User");
+  const [userEmail, setUserEmail] = useState<string>("");
 
   const loadOrders = useCallback(async () => {
     setLoading(true);
@@ -104,9 +102,6 @@ export default function OrdersPage() {
     try {
       const supabase = createClient();
 
-      // Resolve the authenticated user. stores.owner_id references
-      // auth.users(id), so ownership must always be checked against
-      // the auth user id (never the email).
       const {
         data: { user },
         error: authError,
@@ -119,7 +114,9 @@ export default function OrdersPage() {
         return;
       }
 
-      // Fetch every store owned by this user (uuid match on owner_id).
+      setUserName(user.user_metadata?.full_name || user.email?.split("@")[0] || "User");
+      setUserEmail(user.email ?? "");
+
       const { data: storesData, error: storesError } = await supabase
         .from("stores")
         .select("id")
@@ -134,14 +131,11 @@ export default function OrdersPage() {
 
       const storeIds = (storesData ?? []).map((s: Record<string, unknown>) => s.id as string);
 
-      // No stores yet -> there can be no orders either. Show empty state.
       if (storeIds.length === 0) {
         setOrders([]);
         return;
       }
 
-      // RLS (orders_select_owner) additionally scopes these rows to the
-      // authenticated owner, so only their own stores' orders are returned.
       const { data: ordersData, error: ordersError } = await supabase
         .from("orders")
         .select(
@@ -178,6 +172,104 @@ export default function OrdersPage() {
   useEffect(() => {
     loadOrders();
   }, [loadOrders]);
+
+  const totalOrders = orders.length;
+  const completedOrders = orders.filter((o) => o.status === 'delivered' || o.payment_status === 'paid').length;
+  const pendingOrders = orders.filter((o) => o.payment_status === 'pending' || o.status === 'pending').length;
+  const cancelledOrders = orders.filter((o) => o.status === 'cancelled' || o.status === 'refunded').length;
+
+  const orderStats = [
+    { title: 'Total Orders', value: totalOrders.toLocaleString(), change: totalOrders > 0 ? 'Live count' : 'No orders yet', changeType: 'positive' as const, icon: ShoppingCart, comparison: 'vs previous period', trend: [40, 38, 52, 46, 62, 68, 74] },
+    { title: 'Completed Orders', value: completedOrders.toLocaleString(), change: completedOrders > 0 ? 'On track' : 'No completed orders', changeType: 'positive' as const, icon: PackageCheck, comparison: 'fulfilled', trend: [30, 42, 38, 50, 55, 60, 65] },
+    { title: 'Pending Orders', value: pendingOrders.toLocaleString(), change: pendingOrders > 0 ? 'Needs attention' : 'No pending orders', changeType: pendingOrders > 0 ? ('negative' as const) : ('positive' as const), icon: Clock3, comparison: 'awaiting action', trend: [20, 25, 30, 28, 22, 18, 15] },
+    { title: 'Cancelled Orders', value: cancelledOrders.toLocaleString(), change: cancelledOrders > 0 ? 'Review needed' : 'No cancellations', changeType: cancelledOrders > 0 ? ('negative' as const) : ('positive' as const), icon: Ban, comparison: 'refunded/cancelled', trend: [10, 12, 8, 15, 10, 8, 6] },
+  ];
+
+  const statusCounts = new Map<string, number>();
+  for (const o of orders) {
+    statusCounts.set(o.status, (statusCounts.get(o.status) || 0) + 1);
+  }
+  const orderStatuses = [
+    { label: 'Pending', count: String(statusCounts.get('pending') || 0), tone: 'amber' as const },
+    { label: 'Processing', count: String(statusCounts.get('processing') || 0), tone: 'sky' as const },
+    { label: 'Shipped', count: String(statusCounts.get('shipped') || 0), tone: 'violet' as const },
+    { label: 'Delivered', count: String(statusCounts.get('delivered') || 0), tone: 'emerald' as const },
+    { label: 'Cancelled', count: String(statusCounts.get('cancelled') || 0), tone: 'rose' as const },
+    { label: 'Refunded', count: String(statusCounts.get('refunded') || 0), tone: 'slate' as const },
+  ];
+
+  const failedHighValue = orders.filter((o) => o.payment_status === 'failed' && Number(o.total || 0) > 100);
+  const delayedOrders = orders.filter((o) => o.status === 'shipped' && Date.now() - new Date(o.created_at).getTime() > 7 * 24 * 60 * 60 * 1000);
+  const refundRequests = orders.filter((o) => o.status === 'refunded' || o.payment_status === 'refunded');
+
+  const orderAlerts = [];
+  if (failedHighValue.length > 0) {
+    const impact = failedHighValue.reduce((sum, o) => sum + Number(o.total || 0), 0);
+    orderAlerts.push({
+      title: 'High-value order payment failed',
+      description: `${failedHighValue.length} order${failedHighValue.length === 1 ? '' : 's'} with a failed payment and high value. Reach out to these customers to capture the sale.`,
+      impact: `$${impact.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} at risk`,
+      priority: 'High' as const,
+    });
+  }
+  if (delayedOrders.length > 0) {
+    const impact = delayedOrders.reduce((sum, o) => sum + Number(o.total || 0), 0);
+    orderAlerts.push({
+      title: 'Shipping delayed',
+      description: `${delayedOrders.length} order${delayedOrders.length === 1 ? '' : 's'} in transit for over 7 days. Customer may need an update.`,
+      impact: `$${impact.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} at risk`,
+      priority: 'Medium' as const,
+    });
+  }
+  if (refundRequests.length > 0) {
+    const impact = refundRequests.reduce((sum, o) => sum + Number(o.total || 0), 0);
+    orderAlerts.push({
+      title: 'Refund requested',
+      description: `${refundRequests.length} order${refundRequests.length === 1 ? '' : 's'} have been refunded recently.`,
+      impact: `$${impact.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} at risk`,
+      priority: 'Medium' as const,
+    });
+  }
+
+  const aiInsight = {
+    title: failedHighValue.length > 0 ? 'Failed payments detected on high-value orders' : 'Orders are processing normally',
+    description: failedHighValue.length > 0
+      ? `${failedHighValue.length} high-value order${failedHighValue.length === 1 ? '' : 's'} failed payment processing. Recovering these could significantly boost revenue.`
+      : 'All monitored orders are healthy. New issues will appear here as they are detected.',
+    impact: failedHighValue.length > 0 ? `$${failedHighValue.reduce((sum, o) => sum + Number(o.total || 0), 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '$0',
+    actions: failedHighValue.length > 0
+      ? ['Retry failed payments automatically', 'Notify affected customers with a recovery link', 'Review payment gateway configuration', 'Surface a simplified payment flow']
+      : ['Continue monitoring order status', 'Review fulfillment metrics weekly', 'Keep customer communication active'],
+  };
+
+  const recentOrderActivity = orders.slice(0, 6).map((o) => {
+    const customerName = o.customer?.name || 'Unknown customer';
+    const flags =
+      o.payment_status === 'failed'
+        ? ' (payment failed)'
+        : o.payment_status === 'pending'
+          ? ' (payment pending)'
+          : '';
+    return {
+      title: `Order ${o.id.slice(0, 8)}`,
+      detail: `${customerName} · ${formatPrice(Number(o.total || 0))} · ${capitalize(o.status)}${flags}`,
+      time: new Date(o.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+    };
+  });
+
+  const uniqueCustomers = new Set(orders.map((o) => (o.customer as unknown as { customer_id?: string } | null)?.customer_id).filter(Boolean));
+  const returningCount = orders.filter((o) => {
+    const cid = (o.customer as unknown as { customer_id?: string } | null)?.customer_id;
+    if (!cid) return false;
+    return orders.filter((co) => (co.customer as unknown as { customer_id?: string } | null)?.customer_id === cid).length > 1;
+  }).length;
+
+  const customerInsights = [
+    { label: 'Total Customers', value: String(uniqueCustomers.size), description: 'unique customers across all stores' },
+    { label: 'Returning Buyers', value: `${uniqueCustomers.size > 0 ? Math.round((returningCount / uniqueCustomers.size) * 100) : 0}%`, description: 'of this period\'s orders came from returning buyers.' },
+    { label: 'Average Order Value', value: `$${orders.length > 0 ? (orders.reduce((sum, o) => sum + Number(o.total || 0), 0) / orders.length).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00'}`, description: 'across all orders.' },
+    { label: 'Repeat Purchase Rate', value: `${orders.length > 0 ? Math.round((returningCount / orders.length) * 100) : 0}%`, description: 'of customers placed more than one order.' },
+  ];
 
   const tableRows: OrderRow[] = orders.map((row) => ({
     id: row.id,
@@ -234,7 +326,12 @@ export default function OrdersPage() {
   const resolvedDetail = activeOrderId ? getOrderDetail(activeOrderId) : null;
 
   return (
-    <DashboardShell>
+    <DashboardShell
+      user={{
+        name: userName,
+        email: userEmail,
+      }}
+    >
       <div className="mx-auto flex max-w-7xl flex-col gap-6">
         <section className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_20px_50px_-24px_rgba(15,23,42,0.16)] sm:p-8">
           <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
@@ -279,30 +376,26 @@ export default function OrdersPage() {
         </section>
 
         <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <div className="sm:col-span-2 xl:col-span-2">
-            <OrderAlertCard
-              title={orderAlerts[0].title}
-              description={orderAlerts[0].description}
-              impact={orderAlerts[0].impact}
-              priority={orderAlerts[0].priority}
-            />
-          </div>
-          <div className="sm:col-span-2 xl:col-span-2">
-            <OrderAlertCard
-              title={orderAlerts[1].title}
-              description={orderAlerts[1].description}
-              impact={orderAlerts[1].impact}
-              priority={orderAlerts[1].priority}
-            />
-          </div>
-          <div className="xl:col-span-2">
-            <OrderAlertCard
-              title={orderAlerts[2].title}
-              description={orderAlerts[2].description}
-              impact={orderAlerts[2].impact}
-              priority={orderAlerts[2].priority}
-            />
-          </div>
+          {orderAlerts.length > 0 ? (
+            orderAlerts.slice(0, 3).map((alert, idx) => (
+              <div key={idx} className={idx === 2 ? 'xl:col-span-2' : ''}>
+                <OrderAlertCard
+                  title={alert.title}
+                  description={alert.description}
+                  impact={alert.impact}
+                  priority={alert.priority}
+                />
+              </div>
+            ))
+          ) : (
+            <div className="sm:col-span-2 xl:col-span-4">
+              <EmptyState
+                title="No order problems"
+                description="All monitored orders are healthy. New issues will appear here as they are detected."
+                icon={BadgeAlert}
+              />
+            </div>
+          )}
         </section>
 
         <section className="rounded-[24px] border border-slate-200 bg-white p-6 shadow-[0_16px_42px_-24px_rgba(15,23,42,0.24)]">
