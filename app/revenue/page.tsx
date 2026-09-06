@@ -14,6 +14,10 @@ import { Button } from "@/components/ui/button";
 import { SectionHeader } from "@/components/ui/section-header";
 import { ArrowDownToLine, RefreshCw, CircleDollarSign, TrendingUp, ShoppingBag, Zap } from "lucide-react";
 
+function round2(value: number): number {
+  return Math.round(value * 100) / 100;
+}
+
 export default async function RevenuePage() {
   const supabase = await createServerClient();
   const {
@@ -98,7 +102,7 @@ export default async function RevenuePage() {
         action: 'Continue monitoring',
       };
 
-  const expectedRevenue = data.trend.length >= 2 ? `$${round2(data.trend[data.trend.length - 1] * 1.05).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '$0';
+  const expectedRevenue = data.trend.length >= 2 ? `$${Math.round(data.trend[data.trend.length - 1] * 1.05 * 100) / 100}` : '$0';
   const forecastGrowth = data.trend.length >= 2 ? '+5%' : '0%';
   const forecastConfidence = data.trend.length >= 2 ? '75%' : 'Low';
 

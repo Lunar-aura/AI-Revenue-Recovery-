@@ -4,6 +4,9 @@ import { createServerClient } from '@/lib/supabase/server';
 import Groq from 'groq-sdk';
 import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
+import type { LucideIcon } from 'lucide-react';
+import { ShoppingCart, PackageCheck, Clock3, Ban, Users, Wallet, UserPlus } from 'lucide-react';
+import type { CustomerStatus } from '@/lib/customers-data';
 
 export async function logout() {
   const supabase = await createServerClient();
@@ -93,6 +96,11 @@ export async function updateStore(
   return { data };
 }
 
+/**
+ * FIX #3 (security): verify the store belongs to the authenticated user
+ * BEFORE inserting a product into it. Previously this only checked that
+ * the user was logged in, not that they owned `formData.storeId`.
+ */
 export async function createProduct(formData: {
   storeId: string;
   name: string;
@@ -107,6 +115,18 @@ export async function createProduct(formData: {
 
   if (!user) {
     return { error: 'Not authenticated' };
+  }
+
+  // NEW: ownership check
+  const { data: ownedStore, error: storeError } = await supabase
+    .from('stores')
+    .select('id')
+    .eq('id', formData.storeId)
+    .eq('owner_id', user.id)
+    .maybeSingle();
+
+  if (storeError || !ownedStore) {
+    return { error: 'Store not found or access denied' };
   }
 
   const { data, error } = await supabase
@@ -132,6 +152,21 @@ export async function createProduct(formData: {
   return { data };
 }
 
+type ProductOwnerRow = {
+  id: string;
+  store_id: string;
+  stores: { owner_id: string } | { owner_id: string }[] | null;
+};
+
+function resolveProductOwnerId(row: ProductOwnerRow | null): string | null {
+  if (!row || !row.stores) return null;
+  return Array.isArray(row.stores) ? row.stores[0]?.owner_id ?? null : row.stores.owner_id;
+}
+
+/**
+ * FIX #3 (security): verify the product's parent store is owned by the
+ * authenticated user before allowing an update.
+ */
 export async function updateProduct(
   productId: string,
   formData: {
@@ -148,6 +183,19 @@ export async function updateProduct(
 
   if (!user) {
     return { error: 'Not authenticated' };
+  }
+
+  // NEW: ownership check via joined store
+  const { data: existingProduct, error: fetchError } = await supabase
+    .from('products')
+    .select('id, store_id, stores!inner(owner_id)')
+    .eq('id', productId)
+    .single();
+
+  const ownerId = resolveProductOwnerId(existingProduct as ProductOwnerRow | null);
+
+  if (fetchError || !existingProduct || ownerId !== user.id) {
+    return { error: 'Product not found or access denied' };
   }
 
   const { data, error } = await supabase
@@ -173,12 +221,29 @@ export async function updateProduct(
   return { data };
 }
 
+/**
+ * FIX #3 (security): verify the product's parent store is owned by the
+ * authenticated user before allowing a delete.
+ */
 export async function deleteProduct(productId: string) {
   const supabase = await createServerClient();
   const { data: { user } } = await supabase.auth.getUser();
 
   if (!user) {
     return { error: 'Not authenticated' };
+  }
+
+  // NEW: ownership check via joined store
+  const { data: existingProduct, error: fetchError } = await supabase
+    .from('products')
+    .select('id, store_id, stores!inner(owner_id)')
+    .eq('id', productId)
+    .single();
+
+  const ownerId = resolveProductOwnerId(existingProduct as ProductOwnerRow | null);
+
+  if (fetchError || !existingProduct || ownerId !== user.id) {
+    return { error: 'Product not found or access denied' };
   }
 
   const { error } = await supabase
@@ -757,6 +822,26 @@ function isStalePendingOrder(order: DashboardOrder): boolean {
 function changePercent(current: number, previous: number): number | null {
   if (previous <= 0) return null;
   return Math.round(((current - previous) / previous) * 1000) / 10;
+}
+
+function capitalize(value: string): string {
+  if (!value) return value;
+  return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
+function timeAgo(value: string): string {
+  const then = new Date(value).getTime();
+  if (Number.isNaN(then)) return 'recently';
+  const seconds = Math.max(0, Math.floor((Date.now() - then) / 1000));
+  if (seconds < 60) return 'just now';
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days}d ago`;
+  const months = Math.floor(days / 30);
+  return months < 12 ? `${months}mo ago` : `${Math.floor(months / 12)}y ago`;
 }
 
 async function fetchAllDashboardOrders(
@@ -1751,7 +1836,11 @@ export async function getOrdersPageData(storeIds: string[]) {
     };
   }
 
-  const allOrders = orders as unknown as AiOrder[];
+  type JoinedOrder = AiOrder & {
+    customer: { name: string; email: string } | null;
+  };
+
+  const allOrders = orders as unknown as JoinedOrder[];
   const totalOrders = allOrders.length;
   const completedOrders = allOrders.filter((o) => o.status === 'delivered' || o.payment_status === 'paid').length;
   const pendingOrders = allOrders.filter((o) => o.payment_status === 'pending' || o.status === 'pending').length;
@@ -1838,6 +1927,7 @@ export async function getOrdersPageData(storeIds: string[]) {
     const customerOrders = allOrders.filter((co) => co.customer_id === o.customer_id);
     return customerOrders.length > 1;
   }).length;
+  const averageOrderValue = totalOrders > 0 ? round2(allOrders.reduce((sum, o) => sum + toNumber(o.total), 0) / totalOrders) : 0;
   const customerInsights = [
     { label: 'Total Customers', value: String(uniqueCustomers.size), description: 'unique customers across all stores' },
     { label: 'Returning Buyers', value: `${uniqueCustomers.size > 0 ? Math.round((returningCustomers / uniqueCustomers.size) * 100) : 0}%`, description: 'of this period\'s orders came from returning buyers.' },
@@ -1856,7 +1946,7 @@ export async function getCustomersPageData(storeIds: string[]) {
     return {
       stats: [] as Array<{ title: string; value: string; change: string; changeType: 'positive' | 'negative'; icon: LucideIcon; comparison: string; trend: number[] }>,
       segments: [] as Array<{ label: string; count: string; revenue: string; avgSpend: string; growth: string; tone: 'violet' | 'sky' | 'emerald' | 'amber' | 'rose' | 'slate' }>,
-      rows: [] as Array<{ id: string; name: string; email: string; orders: number; totalSpend: string; lastPurchase: string; status: string }>,
+      rows: [] as Array<{ id: string; name: string; email: string; orders: number; totalSpend: string; lastPurchase: string; status: CustomerStatus }>,
       highValueCustomers: [] as Array<{ id: string; name: string; email: string; orders: number; totalSpend: string; clv: string; tier: string; lastPurchase: string; tone: 'violet' | 'sky' | 'slate' }>,
       riskCustomers: [] as Array<{ name: string; email: string; avatar: string; riskLevel: 'High' | 'Medium' | 'Low'; revenueLoss: string; daysSince: number; recommendation: string }>,
       aiInsight: {
@@ -1897,6 +1987,13 @@ export async function getCustomersPageData(storeIds: string[]) {
 
   const allOrders = (orders || []) as AiOrder[];
   const nowMs = Date.now();
+
+  // FIX #2: build a lookup of customer id -> customer so we can resolve
+  // customer names for the activity feed below. The orders query above
+  // intentionally does NOT join `customers` (we already have the full
+  // customers list fetched above), so we look names up locally instead
+  // of trying to read a non-existent `o.customer` relation.
+  const customersById = new Map(customers.map((c) => [c.id, c]));
 
   const customerStatsMap = new Map<string, {
     orderCount: number;
@@ -1961,7 +2058,7 @@ export async function getCustomersPageData(storeIds: string[]) {
 
   const sortedCustomers = customers.map((c) => {
     const stats = customerStatsMap.get(c.id) || { orderCount: 0, totalSpent: 0, lastOrderAt: null, pendingOrders: 0, failedOrders: 0, cancelledOrders: 0 };
-    let status: string = 'New';
+    let status: CustomerStatus = 'New';
     if (stats.orderCount === 0) status = 'Inactive';
     else if (stats.totalSpent > 1000) status = 'VIP';
     else if (stats.orderCount > 1) status = 'Active';
@@ -2003,7 +2100,7 @@ export async function getCustomersPageData(storeIds: string[]) {
       return {
         name: c.name,
         email: c.email,
-        avatar: c.name.split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase(),
+        avatar: c.name.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase(),
         riskLevel: (c.stats.failedOrders > 2 || c.stats.cancelledOrders > 2 ? 'High' : c.stats.failedOrders > 0 || c.stats.cancelledOrders > 0 ? 'Medium' : 'Low') as 'High' | 'Medium' | 'Low',
         revenueLoss: `$${revenueLoss.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
         daysSince,
@@ -2022,8 +2119,11 @@ export async function getCustomersPageData(storeIds: string[]) {
       : ['Continue monitoring customer behavior', 'Review retention metrics weekly', 'Keep engagement campaigns active'],
   };
 
+  // FIX #2: resolve the customer name for each order from the local
+  // `customersById` map (built above) instead of a non-existent
+  // `o.customer` relation.
   const activity = allOrders.slice(0, 6).map((o) => {
-    const customerName = o.customer?.name || 'Unknown customer';
+    const customerName = (o.customer_id && customersById.get(o.customer_id)?.name) || 'Unknown customer';
     const flags =
       o.payment_status === 'failed'
         ? ' (payment failed)'
@@ -2037,9 +2137,12 @@ export async function getCustomersPageData(storeIds: string[]) {
     };
   });
 
+  // FIX #1: `uniqueCustomers` was referenced here but never defined in this
+  // function (it only existed in getOrdersPageData). Use `totalCustomers`,
+  // which is already computed above as `customers.length`.
   const loyaltyInsights = [
     { label: 'Loyalty Levels', value: String(Math.max(1, vipCount)), description: `${vipCount > 0 ? 'Platinum, Gold, Silver, Bronze tiers in use.' : 'No loyalty tiers yet.'}` },
-    { label: 'Repeat Purchase Rate', value: `${uniqueCustomers.size > 0 ? Math.round((returningCustomers / uniqueCustomers.size) * 100) : 0}%`, description: 'of customers return within 30 days.' },
+    { label: 'Repeat Purchase Rate', value: `${totalCustomers > 0 ? Math.round((returningCustomers / totalCustomers) * 100) : 0}%`, description: 'of customers return within 30 days.' },
     { label: 'Average Lifetime Value', value: `$${avgLifetimeValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, description: 'per customer across their lifecycle.' },
     { label: 'Top Customer Segment', value: vipCount > 0 ? 'VIP' : 'New', description: `${vipCount} customers contributing significant revenue.` },
   ];

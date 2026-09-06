@@ -2,6 +2,7 @@ import { DashboardShell } from "@/components/layout/dashboard-shell";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Button } from "@/components/ui/button";
 import { SectionHeader } from "@/components/ui/section-header";
+import { Badge } from "@/components/ui/badge";
 import { BadgeAlert, RefreshCw, ShieldCheck, Sparkles } from "lucide-react";
 import { createServerClient } from "@/lib/supabase/server";
 import { getDashboardData } from "@/app/actions";
@@ -65,7 +66,7 @@ export default async function ProblemsPage() {
               overview.revenueProblems.map((problem) => (
                 <div key={problem.title} className="rounded-[18px] border border-slate-200 bg-white p-5 shadow-[0_10px_30px_-20px_rgba(15,23,42,0.18)]">
                   <div className="flex items-center gap-2">
-                    <BadgeAlert tone={problem.severity === 'High' ? 'rose' : problem.severity === 'Medium' ? 'amber' : 'emerald'} />
+                    <Badge tone={problem.severity === 'High' ? 'rose' : problem.severity === 'Medium' ? 'amber' : 'emerald'}>{problem.severity}</Badge>
                     <h3 className="font-semibold text-slate-900">{problem.title}</h3>
                   </div>
                   <p className="mt-3 text-sm leading-6 text-slate-600">{problem.description}</p>

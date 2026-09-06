@@ -18,6 +18,7 @@ import { Button } from "@/components/ui/button";
 import { SectionHeader } from "@/components/ui/section-header";
 import { createClient } from "@/lib/supabase";
 import { getCustomersPageData } from "@/app/actions";
+import type { CustomerRow } from "@/lib/customers-data";
 import {
   ArrowDownToLine,
   BadgeCheck,
@@ -30,7 +31,7 @@ import {
 
 export default function CustomersPage() {
   const [activeCustomer, setActiveCustomer] = useState<string | null>(null);
-  const [data, setData] = useState<ReturnType<typeof getCustomersPageData> | null>(null);
+  const [data, setData] = useState<Awaited<ReturnType<typeof getCustomersPageData>> | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [userName, setUserName] = useState<string>("User");
@@ -54,20 +55,23 @@ export default function CustomersPage() {
       setUserName(user.user_metadata?.full_name || user.email?.split("@")[0] || "User");
       setUserEmail(user.email ?? "");
 
-      const { data: storesData } = await supabase
-        .from("stores")
-        .select("id")
-        .eq("owner_id", user.id);
+      try {
+        const { data: storesData } = await supabase
+          .from("stores")
+          .select("id")
+          .eq("owner_id", user.id);
 
-      const storeIds = (storesData ?? []).map((s: Record<string, unknown>) => s.id as string);
-      const result = await getCustomersPageData(storeIds);
-      if (!cancelled) {
-        if (result.error) {
-          setError(result.error);
-        } else {
-          setData(result as any);
+        const storeIds = (storesData ?? []).map((s: Record<string, unknown>) => s.id as string);
+        const result = await getCustomersPageData(storeIds);
+        if (!cancelled) {
+          setData(result);
+          setLoading(false);
         }
-        setLoading(false);
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : "Failed to load customers");
+          setLoading(false);
+        }
       }
     });
     return () => {
@@ -226,7 +230,7 @@ export default function CustomersPage() {
         </section>
 
         <section>
-          <CustomerTable rows={data.rows} onViewCustomer={(row) => setActiveCustomer(row.id)} />
+          <CustomerTable rows={data.rows as CustomerRow[]} onViewCustomer={(row) => setActiveCustomer(row.id)} />
           <CustomerProfileDrawer
             open={activeCustomer !== null}
             customer={resolvedCustomer as any}
